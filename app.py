@@ -282,6 +282,59 @@ def build_summary(df_result: pd.DataFrame):
     return summary
 
 
+def build_region_coordinates(regions):
+    return pd.DataFrame(
+        [
+            {"Region": name, "Latitude": lat, "Longitude": lon}
+            for name, (lat, lon) in REGIONS.items()
+            if name in regions
+        ]
+    )
+
+
+def build_prediction_map_data(summary: pd.DataFrame):
+    region_status = (
+        summary.groupby("Region", as_index=False)
+        .agg(
+            **{
+                "Max Flood Prob.": ("Flood Prob.", "max"),
+                "Flood Alert Days": (
+                    "Alert",
+                    lambda alerts: int((alerts == "⚠ FLOOD").sum()),
+                ),
+                "Total Rain (mm)": ("Rain (mm)", "sum"),
+                "Avg Humidity (%)": ("Humidity (%)", "mean"),
+            }
+        )
+    )
+
+    map_df = build_region_coordinates(region_status["Region"].tolist())
+    map_df = map_df.merge(region_status, on="Region", how="left")
+    map_df["Status"] = np.where(
+        map_df["Flood Alert Days"] > 0,
+        "Flood Alert",
+        "No Flood",
+    )
+    map_df["Max Flood Prob."] = map_df["Max Flood Prob."].round(4)
+    map_df["Total Rain (mm)"] = map_df["Total Rain (mm)"].round(2)
+    map_df["Avg Humidity (%)"] = map_df["Avg Humidity (%)"].round(2)
+
+    return map_df
+
+
+def render_map_view(map_df: pd.DataFrame):
+    if map_df.empty:
+        st.info("Tidak ada region untuk ditampilkan di peta.")
+        return
+
+    st.map(
+        map_df.rename(columns={"Latitude": "lat", "Longitude": "lon"})[
+            ["lat", "lon"]
+        ],
+        use_container_width=True,
+    )
+
+
 # =========================
 # STREAMLIT UI
 # =========================
@@ -312,7 +365,6 @@ with st.sidebar:
     )
 
     model_path = DEFAULT_MODEL_PATH
-   
 
     selected_regions = st.multiselect(
         "Region",
@@ -321,14 +373,16 @@ with st.sidebar:
     )
 
     run_button = st.button("Run Prediction", type="primary", use_container_width=True)
-st.subheader("Region Coordinates")
-region_df = pd.DataFrame(
-    [
-        {"Region": name, "Latitude": lat, "Longitude": lon}
-        for name, (lat, lon) in REGIONS.items()
-    ]
-)
-st.dataframe(region_df, use_container_width=True, hide_index=True)
+
+st.subheader("Region View")
+region_df = build_region_coordinates(selected_regions)
+map_tab, coordinate_tab = st.tabs(["Map View", "Coordinates"])
+
+with map_tab:
+    render_map_view(region_df)
+
+with coordinate_tab:
+    st.dataframe(region_df, use_container_width=True, hide_index=True)
 
 if run_button:
     if not selected_regions:
@@ -340,7 +394,6 @@ if run_button:
         st.stop()
 
     model_data = load_model_from_path(model_path)
-
 
     raw_responses = {}
     fetch_errors = []
@@ -394,19 +447,33 @@ if run_button:
     col2.metric("Flood Alerts", flood_rows)
     col3.metric("Max Probability", f"{max_prob:.2%}")
 
-    st.subheader("Prediction Summary")
-    st.dataframe(summary, use_container_width=True, hide_index=True)
-
-    st.subheader("Flood Probability by Date")
-    chart_df = summary.copy()
-    chart_df["Date"] = pd.to_datetime(chart_df["Date"])
-    chart_df = chart_df.pivot_table(
-        index="Date",
-        columns="Region",
-        values="Flood Prob.",
-        aggfunc="mean",
+    st.subheader("Prediction View")
+    prediction_map_df = build_prediction_map_data(summary)
+    prediction_map_tab, summary_tab, chart_tab = st.tabs(
+        ["Map View", "Summary", "Trend"]
     )
-    st.line_chart(chart_df)
+
+    with prediction_map_tab:
+        render_map_view(prediction_map_df)
+        st.dataframe(
+            prediction_map_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with summary_tab:
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+
+    with chart_tab:
+        chart_df = summary.copy()
+        chart_df["Date"] = pd.to_datetime(chart_df["Date"])
+        chart_df = chart_df.pivot_table(
+            index="Date",
+            columns="Region",
+            values="Flood Prob.",
+            aggfunc="mean",
+        )
+        st.line_chart(chart_df)
 
   
     csv = summary.to_csv(index=False).encode("utf-8")
