@@ -286,13 +286,12 @@ def build_summary(df_result: pd.DataFrame):
 # STREAMLIT UI
 # =========================
 st.set_page_config(
-    page_title="Flood Forecaster",
-    page_icon="🌧️",
+    page_title="Welcome to Floodium",
     layout="wide",
 )
 
-st.title("🌧️ Flood Forecaster")
-st.caption("Prediksi potensi banjir berdasarkan forecast OpenWeatherMap dan model ML.")
+st.title("Welcome to Floodium")
+st.caption("Peramal banjir berbasis ML model yang cepat dan akurat")
 
 with st.sidebar:
     st.header("Configuration")
@@ -322,7 +321,6 @@ with st.sidebar:
     )
 
     run_button = st.button("Run Prediction", type="primary", use_container_width=True)
-
 st.subheader("Region Coordinates")
 region_df = pd.DataFrame(
     [
