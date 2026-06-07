@@ -11,7 +11,7 @@ import streamlit as st
 # =========================
 # CONFIG
 # =========================
-DEFAULT_MODEL_PATH = "model_data.pkl"
+DEFAULT_MODEL_PATH = "./model_data.pkl"
 
 REGIONS = {
     "Jakarta Pusat": (-6.1862, 106.8063),
@@ -339,18 +339,8 @@ if run_button:
         st.error("OpenWeatherMap API Key wajib diisi.")
         st.stop()
 
-    try:
-        if model_source == "Local file":
-            model_data = load_model_from_path(model_path)
-        else:
-            if uploaded_model is None:
-                st.error("Upload file model_data.pkl terlebih dahulu.")
-                st.stop()
-            model_data = load_model_from_uploaded_file(uploaded_model)
+    model_data = load_model_from_path(model_path)
 
-    except Exception as err:
-        st.error(f"Gagal load model: {err}")
-        st.stop()
 
     raw_responses = {}
     fetch_errors = []
