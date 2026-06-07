@@ -408,14 +408,7 @@ if run_button:
     )
     st.line_chart(chart_df)
 
-    st.subheader("Raw 3-Hour Forecast Data")
-    with st.expander("Show raw OpenWeatherMap parsed data"):
-        st.dataframe(df_3h, use_container_width=True, hide_index=True)
-
-    st.subheader("Daily Aggregated Data")
-    with st.expander("Show daily aggregated features before final feature engineering"):
-        st.dataframe(df_daily, use_container_width=True, hide_index=True)
-
+  
     csv = summary.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="Download Prediction CSV",
