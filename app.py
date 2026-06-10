@@ -29,8 +29,15 @@ DEFAULT_FLOOD_THRESHOLD = 0.45
 # =========================
 @st.cache_resource
 def load_model_from_path(model_path: str):
-    with open(model_path, "rb") as f:
-        model_data = pickle.load(f)
+    try:
+        with open(model_path, "rb") as f:
+            model_data = pickle.load(f)
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError(
+            "Failed to load model_data.pkl because a training dependency is missing. "
+            "Add the package used to create the pickle to requirements.txt "
+            f"(missing module: {err.name})."
+        ) from err
 
     required_keys = [
         "le_region",
@@ -49,7 +56,14 @@ def load_model_from_path(model_path: str):
 
 
 def load_model_from_uploaded_file(uploaded_file):
-    model_data = pickle.load(uploaded_file)
+    try:
+        model_data = pickle.load(uploaded_file)
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError(
+            "Failed to load the uploaded model because a training dependency is missing. "
+            "Add the package used to create the pickle to requirements.txt "
+            f"(missing module: {err.name})."
+        ) from err
 
     required_keys = [
         "le_region",
