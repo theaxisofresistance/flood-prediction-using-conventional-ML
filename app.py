@@ -4,6 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -349,6 +350,87 @@ def render_map_view(map_df: pd.DataFrame):
     )
 
 
+def render_prediction_map_view(map_df: pd.DataFrame, summary: pd.DataFrame):
+    if map_df.empty:
+        st.info("Tidak ada region untuk ditampilkan di peta.")
+        return
+
+    color_map = {
+        "Flood Alert": "#d62828",
+        "No Flood": "#2a9d8f",
+    }
+
+    marker_colors = [
+        color_map.get(status, "#457b9d") for status in map_df["Status"]
+    ]
+
+    hover_text = [
+        (
+            f"{row['Region']}<br>"
+            f"Status: {row['Status']}<br>"
+            f"Max Flood Prob.: {row['Max Flood Prob.']:.2%}<br>"
+            f"Flood Alert Days: {int(row['Flood Alert Days'])}<br>"
+            f"Total Rain: {row['Total Rain (mm)']:.2f} mm"
+        )
+        for _, row in map_df.iterrows()
+    ]
+
+    fig = go.Figure(
+        go.Scattermapbox(
+            lat=map_df["Latitude"],
+            lon=map_df["Longitude"],
+            mode="markers",
+            marker={
+                "size": 18,
+                "color": marker_colors,
+            },
+            text=hover_text,
+            hovertemplate="%{text}<extra></extra>",
+            customdata=map_df[["Region"]].to_numpy(),
+        )
+    )
+
+    fig.update_layout(
+        mapbox={
+            "style": "open-street-map",
+            "center": {
+                "lat": float(map_df["Latitude"].mean()),
+                "lon": float(map_df["Longitude"].mean()),
+            },
+            "zoom": 9,
+        },
+        margin={"l": 0, "r": 0, "t": 0, "b": 0},
+        clickmode="event+select",
+        height=420,
+    )
+
+    event = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="prediction_map_chart",
+        on_select="rerun",
+    )
+
+    st.caption("Klik titik pada peta untuk melihat ringkasan region.")
+
+    selection = event.selection if event else None
+    if isinstance(selection, dict):
+        points = selection.get("points", [])
+    else:
+        points = getattr(selection, "points", []) if selection else []
+
+    selected_region = None
+    if points:
+        selected_region = points[0]["customdata"][0]
+
+    if selected_region:
+        selected_summary = summary[summary["Region"] == selected_region].copy()
+        st.markdown(f"**Summary for {selected_region}**")
+        st.dataframe(selected_summary, use_container_width=True, hide_index=True)
+    else:
+        st.info("Belum ada region yang dipilih dari peta.")
+
+
 # =========================
 # STREAMLIT UI
 # =========================
@@ -468,7 +550,7 @@ if run_button:
     )
 
     with prediction_map_tab:
-        render_map_view(prediction_map_df)
+        render_prediction_map_view(prediction_map_df, summary)
         st.dataframe(
             prediction_map_df,
             use_container_width=True,
