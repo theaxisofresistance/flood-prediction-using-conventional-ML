@@ -447,7 +447,7 @@ with st.sidebar:
 
     api_key = st.text_input(
         "OpenWeatherMap API Key",
-        value=os.getenv("OWM_API_KEY", ""),
+        value=os.getenv("OWM_API_KEY", "97bc38df5fcf84748795471418d012c6"),
         type="password",
         help="Bisa juga set environment variable OWM_API_KEY.",
     )
