@@ -12,7 +12,8 @@ import streamlit as st
 # =========================
 # CONFIG
 # =========================
-DEFAULT_MODEL_PATH = "./model_data.pkl"
+DEFAULT_MODEL_PATH = "./model_data_multi.pkl"
+DEFAULT_MODEL_NAME = "XGBoost"
 
 REGIONS = {
     "Jakarta Pusat": (-6.1862, 106.8063),
@@ -40,13 +41,15 @@ def load_model_from_path(model_path: str):
             f"(missing module: {err.name})."
         ) from err
 
+    model_data = normalize_model_data(model_data)
+
     required_keys = [
         "le_region",
         "region_map",
         "feature_cols",
         "scaler",
-        "flood_model",
-        "best_params",
+        "models",
+        "thresholds",
     ]
 
     missing = [key for key in required_keys if key not in model_data]
@@ -66,18 +69,80 @@ def load_model_from_uploaded_file(uploaded_file):
             f"(missing module: {err.name})."
         ) from err
 
+    model_data = normalize_model_data(model_data)
+
     required_keys = [
         "le_region",
         "region_map",
         "feature_cols",
         "scaler",
-        "flood_model",
-        "best_params",
+        "models",
+        "thresholds",
     ]
 
     missing = [key for key in required_keys if key not in model_data]
     if missing:
         raise KeyError(f"Missing key(s) in uploaded model: {missing}")
+
+    return model_data
+
+
+def normalize_model_data(model_data: dict):
+    model_data = dict(model_data)
+
+    if "models" not in model_data:
+        if "best_model" in model_data or "additional_model" in model_data:
+            models = {}
+            thresholds = {}
+
+            best_model = model_data.get("best_model", {})
+            additional_model = model_data.get("additional_model", {})
+
+            xgb_model = best_model.get("xgb_model", model_data.get("flood_model"))
+            if xgb_model is not None:
+                models["XGBoost"] = xgb_model
+                thresholds["XGBoost"] = float(best_model.get("xgb_threshold", 0.5))
+
+            rf_model = additional_model.get("rf")
+            if rf_model is not None:
+                models["Random Forest"] = rf_model
+                thresholds["Random Forest"] = 0.5
+
+            logreg_model = additional_model.get("logreg")
+            if logreg_model is not None:
+                models["Logistic Regression"] = logreg_model
+                thresholds["Logistic Regression"] = 0.5
+
+            if not models:
+                raise KeyError(
+                    "Missing model(s): expected a valid 'best_model' or 'additional_model' entry"
+                )
+
+            model_data["models"] = models
+            model_data["thresholds"] = thresholds
+            model_data.setdefault("flood_model", xgb_model or next(iter(models.values())))
+            model_data.setdefault("best_params", best_model.get("xgb_params"))
+        elif "flood_model" in model_data:
+            model_data["models"] = {
+                DEFAULT_MODEL_NAME: model_data["flood_model"],
+            }
+            model_data["thresholds"] = {
+                DEFAULT_MODEL_NAME: 0.5,
+            }
+        else:
+            raise KeyError(
+                "Missing model(s): expected either 'models', 'best_model', 'additional_model', or 'flood_model'"
+            )
+
+    if "thresholds" not in model_data:
+        model_data["thresholds"] = {
+            name: 0.5 for name in model_data["models"].keys()
+        }
+    else:
+        model_data["thresholds"] = {
+            name: float(model_data["thresholds"].get(name, 0.5))
+            for name in model_data["models"].keys()
+        }
 
     return model_data
 
@@ -184,8 +249,10 @@ def feature_engineer_inference(df: pd.DataFrame):
 
     df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
     df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
-    df["doy_sin"] = np.sin(2 * np.pi * df["day_of_year"] / 365)
-    df["doy_cos"] = np.cos(2 * np.pi * df["day_of_year"] / 365)
+    df["day_sin"] = np.sin(2 * np.pi * df["day_of_year"] / 365)
+    df["day_cos"] = np.cos(2 * np.pi * df["day_of_year"] / 365)
+    df["doy_sin"] = df["day_sin"]
+    df["doy_cos"] = df["day_cos"]
 
     df.drop(columns=["month", "day_of_year"], inplace=True)
 
@@ -234,11 +301,40 @@ def feature_engineer_inference(df: pd.DataFrame):
 # =========================
 # INFERENCE
 # =========================
-def predict_flood(df_3h: pd.DataFrame, model_data: dict, flood_threshold: float):
+def resolve_model_choice(model_data: dict, selected_model_name: str):
+    models = model_data["models"]
+    thresholds = model_data.get("thresholds", {})
+
+    if selected_model_name not in models:
+        if len(models) == 1:
+            selected_model_name = next(iter(models))
+        else:
+            raise KeyError(
+                f"Model '{selected_model_name}' is not available. "
+                f"Available models: {list(models.keys())}"
+            )
+
+    model = models[selected_model_name]
+    flood_threshold = float(thresholds.get(selected_model_name, 0.5))
+
+    return selected_model_name, model, flood_threshold
+
+
+def predict_flood(
+    df_3h: pd.DataFrame,
+    model_data: dict,
+    flood_threshold,
+    selected_model_name: str,
+):
     le_region = model_data["le_region"]
     feature_cols = model_data["feature_cols"]
     scaler = model_data["scaler"]
-    model = model_data["flood_model"]
+    selected_model_name, model, default_threshold = resolve_model_choice(
+        model_data, selected_model_name
+    )
+    flood_threshold = (
+        default_threshold if flood_threshold is None else float(flood_threshold)
+    )
 
     df_daily = preprocess_inference(df_3h, le_region)
     df_feat = feature_engineer_inference(df_daily)
@@ -442,16 +538,31 @@ st.set_page_config(
 st.title("Welcome to Floodium")
 st.caption("Peramal banjir berbasis ML model yang cepat dan akurat")
 
+model_preview = load_model_from_path(DEFAULT_MODEL_PATH)
+available_models = list(model_preview["models"].keys())
+
 with st.sidebar:
     st.header("Configuration")
 
     api_key = "97bc38df5fcf84748795471418d012c6"
 
+    selected_model_name = st.selectbox(
+        "Model",
+        options=available_models,
+        index=available_models.index(DEFAULT_MODEL_NAME)
+        if DEFAULT_MODEL_NAME in available_models
+        else 0,
+    )
+
+    default_threshold = float(
+        model_preview.get("thresholds", {}).get(selected_model_name, 0.5)
+    )
+
     flood_threshold = st.slider(
         "Flood Threshold",
         min_value=0.0,
         max_value=1.0,
-        value=DEFAULT_FLOOD_THRESHOLD,
+        value=default_threshold,
         step=0.01,
     )
 
@@ -521,6 +632,7 @@ if run_button:
             df_3h=df_3h,
             model_data=model_data,
             flood_threshold=flood_threshold,
+            selected_model_name=selected_model_name,
         )
 
         summary = build_summary(df_result)
