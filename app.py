@@ -688,4 +688,4 @@ if run_button:
     )
 
 else:
-    st.info("Isi API key dan model, lalu klik Run Prediction.")
+    st.info("klik Run Prediction.")
